@@ -1,58 +1,57 @@
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from openai import OpenAI
-from dotenv import load_dotenv
+from openai import OpenAI, OpenAIError
 
-# Load .env variables
-load_dotenv()
+app = FastAPI(title="Bible AI", description="Get Bible verses using AI", version="1.0.0")
 
-app = FastAPI()
-
-# Initialize OpenAI client with API key from .env
+# Load API key
 api_key = os.getenv("OPENAI_API_KEY")
 client = OpenAI(api_key=api_key)
 
-# Toggle this to True to avoid real API calls
-TEST_MODE = False
-
-# Pydantic model for POST /bible
-class BibleRequest(BaseModel):
+# Request body
+class BibleQuery(BaseModel):
     query: str
 
+# Root endpoint
 @app.get("/")
-async def root():
+def read_root():
     return {"message": "Bible AI is running!"}
 
+# Bible endpoint
 @app.post("/bible")
-async def bible_ai(request: BibleRequest):
-    query = request.query
+async def get_bible_verse(bible_query: BibleQuery, request: Request):
+    query = bible_query.query
 
-    # If test mode is enabled, return a dummy response
-    if TEST_MODE:
-        return {
-            "mode": "test",
-            "answer": f"TEST MODE: This is a dummy AI answer for '{query}'"
-        }
+    # Log request
+    print(f"Received query: {query}")
 
     try:
-        # Real OpenAI API call
-        response = client.responses.create(
-            model="gpt-4.1-mini",  # Use gpt-4.1-mini for cost efficiency
-            input=f"Give a Bible-based response for: {query}"
+        # Make real OpenAI API request
+        response = client.chat.completions.create(
+            model="gpt-4.1-mini",  # Recommended cost-effective model
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that provides Bible verses and explanations."},
+                {"role": "user", "content": query},
+            ],
+            max_tokens=150
         )
 
-        answer = response.output[0].content[0].text
+        answer = response.choices[0].message.content.strip()
+        return {"mode": "real", "answer": answer}
 
-        return {
-            "mode": "real",
-            "answer": answer
-        }
+    except OpenAIError as e:
+        # Fallback to test mode on any error (like quota exceeded)
+        print(f"Error occurred: {e}")
+        return JSONResponse(
+            status_code=200,
+            content={
+                "mode": "test",
+                "answer": "TEST MODE: “I can do all things through Christ who strengthens me.” — Philippians 4:13"
+            }
+        )
 
-    except Exception as e:
-        return {
-            "error": str(e)
-        }
 
 
 
